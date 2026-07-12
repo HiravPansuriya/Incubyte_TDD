@@ -11,15 +11,16 @@ describe('Auth Endpoints', () => {
     it('should register a new user successfully and return a token', async () => {
       const res = await request(app).post('/api/auth/register').send({
         email: 'testuser@example.com',
-        password: 'password123'
+        password: 'password123',
+        fullName: 'Test User'
       });
       expect(res.statusCode).toEqual(201);
       expect(res.body.user).toHaveProperty('token');
     });
 
     it('should not register a user with an existing email', async () => {
-      await request(app).post('/api/auth/register').send({ email: 'dup@example.com', password: 'pass' });
-      const res = await request(app).post('/api/auth/register').send({ email: 'dup@example.com', password: 'pass' });
+      await request(app).post('/api/auth/register').send({ email: 'dup@example.com', password: 'pass', fullName: 'Dup User' });
+      const res = await request(app).post('/api/auth/register').send({ email: 'dup@example.com', password: 'pass', fullName: 'Dup User' });
       expect(res.statusCode).toEqual(400);
     });
   });
@@ -29,7 +30,8 @@ describe('Auth Endpoints', () => {
     beforeEach(async () => {
       await request(app).post('/api/auth/register').send({
         email: 'login@example.com',
-        password: 'securepassword'
+        password: 'securepassword',
+        fullName: 'Login User'
       });
     });
 

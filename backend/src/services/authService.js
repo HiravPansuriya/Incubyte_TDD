@@ -7,14 +7,14 @@ const generateToken = (id, role) => {
 };
 
 export const registerUser = async (userData) => {
-    const { email, password } = userData;
+    const { email, password, fullName } = userData;
     const userExists = await User.findOne({ email });
     if (userExists) throw new Error('User already exists');
 
-    const user = await User.create({ email, password });
+    const user = await User.create({ email, password, fullName });
     const token = generateToken(user._id, user.role);
 
-    return { _id: user._id, email: user.email, role: user.role, token };
+    return { _id: user._id, email: user.email, fullName: user.fullName, role: user.role, token };
 };
 
 export const loginUser = async (userData) => {
@@ -28,5 +28,5 @@ export const loginUser = async (userData) => {
 
     const token = generateToken(user._id, user.role);
 
-    return { _id: user._id, email: user.email, role: user.role, token };
+    return { _id: user._id, email: user.email, fullName: user.fullName, role: user.role, token };
 };
