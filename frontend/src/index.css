@@ -1,18 +1,26 @@
-:root {
-  --bg-color: #f3f4f6;
-  --text-color: #1f2937;
-  --primary-color: #2563eb;
-  --font-family: system-ui, -apple-system, sans-serif;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-950 text-slate-100 antialiased selection:bg-emerald-500/30 selection:text-emerald-400;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
 }
 
-body {
-  margin: 0;
-  font-family: var(--font-family);
-  background-color: var(--bg-color);
-  color: var(--text-color);
-  -webkit-font-smoothing: antialiased;
+/* Custom Scrollbar for sleek design */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
-
-* {
-  box-sizing: border-box;
+::-webkit-scrollbar-track {
+  background: #020617;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
 }
