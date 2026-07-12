@@ -1,10 +1,14 @@
-import express, { json } from 'express';
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import authRoutes from './routes/authRoutes.js';
+
+dotenv.config();
 const app = express();
 
-app.use(json());
+app.use(cors());
+app.use(express.json());
 
-app.post('/api/auth/register', (req, res) => {
-  res.status(201).json({ message: 'User registered successfully' });
-});
+app.use('/api/auth', authRoutes);
 
 export default app;
