@@ -1,21 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-
-const DEFAULT_VEHICLES = [
-  { id: '1', make: 'Tesla', model: 'Model S Plaid', category: 'Electric', price: 89990, quantity: 5 },
-  { id: '2', make: 'Porsche', model: '911 GT3 RS', category: 'Sports', price: 223800, quantity: 2 },
-  { id: '3', make: 'Rivian', model: 'R1S', category: 'SUV', price: 78000, quantity: 6 },
-  { id: '4', make: 'Audi', model: 'e-tron GT', category: 'Electric', price: 106500, quantity: 0 },
-  { id: '5', make: 'Ford', model: 'Mustang Mach-E', category: 'SUV', price: 43995, quantity: 12 },
-  { id: '6', make: 'Ferrari', model: 'SF90 Stradale', category: 'Sports', price: 524000, quantity: 1 }
-];
+import api from '../api/axios';
 
 const Dashboard = () => {
   const [vehicles, setVehicles] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [minPrice, setMinPrice] = useState('');
   const [maxPrice, setMaxPrice] = useState('');
+  const [loading, setLoading] = useState(false);
   
   // Admin form states
   const [editingId, setEditingId] = useState(null);
@@ -41,36 +35,56 @@ const Dashboard = () => {
     }
   }, [token, navigate]);
 
-  // Load vehicles from localStorage
+  // Load categories and all vehicles initially and on filter changes
   useEffect(() => {
-    const saved = localStorage.getItem('vehicles');
-    if (saved) {
-      try {
-        setVehicles(JSON.parse(saved));
-      } catch (e) {
-        setVehicles(DEFAULT_VEHICLES);
-        localStorage.setItem('vehicles', JSON.stringify(DEFAULT_VEHICLES));
-      }
-    } else {
-      setVehicles(DEFAULT_VEHICLES);
-      localStorage.setItem('vehicles', JSON.stringify(DEFAULT_VEHICLES));
+    if (token) {
+      fetchVehicles();
     }
-  }, []);
+  }, [token, search, categoryFilter, minPrice, maxPrice]);
 
-  // Save vehicles wrapper
-  const saveVehiclesState = (newVehicles) => {
-    setVehicles(newVehicles);
-    localStorage.setItem('vehicles', JSON.stringify(newVehicles));
+  // Separate effect to load list of all unique categories
+  useEffect(() => {
+    if (token) {
+      loadAllCategories();
+    }
+  }, [token, vehicles.length]);
+
+  const loadAllCategories = async () => {
+    try {
+      const response = await api.get('/vehicles');
+      const cats = [...new Set(response.data.vehicles.map(v => v.category))];
+      setCategories(cats);
+    } catch (err) {
+      console.error('Failed to load categories', err);
+    }
+  };
+
+  const fetchVehicles = async () => {
+    setLoading(true);
+    try {
+      const params = {};
+      if (search) params.search = search;
+      if (categoryFilter) params.category = categoryFilter;
+      if (minPrice) params.minPrice = minPrice;
+      if (maxPrice) params.maxPrice = maxPrice;
+
+      const response = await api.get('/vehicles/search', { params });
+      setVehicles(response.data.vehicles);
+    } catch (err) {
+      const msg = err.response?.data?.message || 'Failed to fetch vehicles from the server.';
+      showNotification(msg, 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const showNotification = (message, type = 'success') => {
     setNotification({ message, type });
     setTimeout(() => {
       setNotification({ message: '', type: '' });
-    }, 4000);
+    }, 4500);
   };
 
-  // Logout handler
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('email');
@@ -79,20 +93,18 @@ const Dashboard = () => {
     navigate('/');
   };
 
-  // Purchase vehicle action
-  const handlePurchase = (id) => {
-    const updated = vehicles.map(v => {
-      if (v.id === id && v.quantity > 0) {
-        showNotification(`Purchased ${v.make} ${v.model} successfully!`);
-        return { ...v, quantity: v.quantity - 1 };
-      }
-      return v;
-    });
-    saveVehiclesState(updated);
+  const handlePurchase = async (id) => {
+    try {
+      const response = await api.post(`/vehicles/${id}/purchase`);
+      showNotification(response.data.message || 'Vehicle purchased successfully!');
+      fetchVehicles();
+    } catch (err) {
+      const msg = err.response?.data?.message || 'Purchase failed.';
+      showNotification(msg, 'error');
+    }
   };
 
-  // Admin add or update vehicle
-  const handleSaveVehicle = (e) => {
+  const handleSaveVehicle = async (e) => {
     e.preventDefault();
     if (!makeInput || !modelInput || !categoryInput || priceInput === '' || quantityInput === '') {
       showNotification('Please fill in all inputs', 'error');
@@ -107,49 +119,41 @@ const Dashboard = () => {
       return;
     }
 
-    if (editingId) {
-      // Update
-      const updated = vehicles.map(v => {
-        if (v.id === editingId) {
-          return {
-            ...v,
-            make: makeInput,
-            model: modelInput,
-            category: categoryInput,
-            price,
-            quantity
-          };
-        }
-        return v;
-      });
-      saveVehiclesState(updated);
-      showNotification(`Vehicle updated successfully`);
-      setEditingId(null);
-    } else {
-      // Add
-      const newVehicle = {
-        id: Date.now().toString(),
+    try {
+      const payload = {
         make: makeInput,
         model: modelInput,
         category: categoryInput,
         price,
         quantity
       };
-      saveVehiclesState([...vehicles, newVehicle]);
-      showNotification(`Vehicle "${makeInput} ${modelInput}" added successfully`);
-    }
 
-    // Reset inputs
-    setMakeInput('');
-    setModelInput('');
-    setCategoryInput('');
-    setPriceInput('');
-    setQuantityInput('');
+      if (editingId) {
+        // Update vehicle
+        const response = await api.put(`/vehicles/${editingId}`, payload);
+        showNotification(response.data.message || 'Vehicle updated successfully');
+        setEditingId(null);
+      } else {
+        // Add new vehicle
+        const response = await api.post('/vehicles', payload);
+        showNotification(response.data.message || 'Vehicle added successfully');
+      }
+
+      // Reset inputs & refresh
+      setMakeInput('');
+      setModelInput('');
+      setCategoryInput('');
+      setPriceInput('');
+      setQuantityInput('');
+      fetchVehicles();
+    } catch (err) {
+      const msg = err.response?.data?.message || 'Failed to save vehicle details.';
+      showNotification(msg, 'error');
+    }
   };
 
-  // Edit action
   const handleEditClick = (v) => {
-    setEditingId(v.id);
+    setEditingId(v._id);
     setMakeInput(v.make);
     setModelInput(v.model);
     setCategoryInput(v.category);
@@ -157,7 +161,6 @@ const Dashboard = () => {
     setQuantityInput(v.quantity.toString());
   };
 
-  // Cancel edit
   const handleCancelEdit = () => {
     setEditingId(null);
     setMakeInput('');
@@ -167,50 +170,38 @@ const Dashboard = () => {
     setQuantityInput('');
   };
 
-  // Restock action (quick restock by amount)
-  const handleQuickRestock = (id, amount) => {
-    const updated = vehicles.map(v => {
-      if (v.id === id) {
-        showNotification(`Restocked ${v.make} ${v.model} (+${amount})`);
-        return { ...v, quantity: v.quantity + amount };
-      }
-      return v;
-    });
-    saveVehiclesState(updated);
+  const handleQuickRestock = async (id, amount) => {
+    try {
+      const response = await api.post(`/vehicles/${id}/restock`, { quantity: amount });
+      showNotification(response.data.message || `Restocked successfully (+${amount})`);
+      fetchVehicles();
+    } catch (err) {
+      const msg = err.response?.data?.message || 'Failed to restock vehicle.';
+      showNotification(msg, 'error');
+    }
   };
 
-  // Delete action
-  const handleDelete = (id) => {
-    const vehicle = vehicles.find(v => v.id === id);
-    const updated = vehicles.filter(v => v.id !== id);
-    saveVehiclesState(updated);
-    showNotification(`Deleted vehicle ${vehicle?.make || ''} successfully`, 'warning');
-    if (editingId === id) handleCancelEdit();
+  const handleDelete = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this vehicle listing?')) return;
+    try {
+      const response = await api.delete(`/vehicles/${id}`);
+      showNotification(response.data.message || 'Deleted vehicle listing successfully', 'warning');
+      if (editingId === id) handleCancelEdit();
+      fetchVehicles();
+    } catch (err) {
+      const msg = err.response?.data?.message || 'Failed to delete vehicle.';
+      showNotification(msg, 'error');
+    }
   };
 
-  // Filter computation
-  const filteredVehicles = vehicles.filter(v => {
-    const query = search.toLowerCase();
-    const matchesSearch =
-      v.make.toLowerCase().includes(query) ||
-      v.model.toLowerCase().includes(query) ||
-      v.category.toLowerCase().includes(query);
-
-    const matchesCategory = categoryFilter === '' || v.category === categoryFilter;
-    
-    const minVal = minPrice === '' ? 0 : parseFloat(minPrice);
-    const maxVal = maxPrice === '' ? Infinity : parseFloat(maxPrice);
-    const matchesPrice = v.price >= minVal && v.price <= maxVal;
-
-    return matchesSearch && matchesCategory && matchesPrice;
-  });
-
-  const categories = [...new Set(vehicles.map(v => v.category))];
-
-  // Stats computation
-  const totalStock = vehicles.reduce((sum, v) => sum + v.quantity, 0);
-  const outOfStockCount = vehicles.filter(v => v.quantity === 0).length;
-  const inventoryValue = vehicles.reduce((sum, v) => sum + (v.price * v.quantity), 0);
+  // Format currency into Indian Rupees (INR)
+  const formatRupee = (price) => {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 0
+    }).format(price);
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
@@ -281,28 +272,41 @@ const Dashboard = () => {
 
         {/* Dashboard Title & Stats Grid */}
         <section className="flex flex-col gap-6">
-          <div className="text-left">
-            <h1 className="text-3xl font-extrabold text-white">Dealership Dashboard</h1>
-            <p className="text-slate-400 text-xs mt-1">Real-time status of your vehicle dealership inventory</p>
+          <div className="text-left flex justify-between items-center">
+            <div>
+              <h1 className="text-3xl font-extrabold text-white">Dealership Dashboard</h1>
+              <p className="text-slate-400 text-xs mt-1">Indian Automotive Inventory System (INR prices)</p>
+            </div>
+            {loading && (
+              <div className="flex items-center gap-2 text-slate-400 text-xs">
+                <svg className="animate-spin h-4 w-4 text-emerald-400" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Syncing catalog...
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
             <div className="p-6 rounded-2xl border border-slate-900 bg-slate-900/20 backdrop-blur-sm flex flex-col text-left">
-              <span className="text-slate-400 text-xs font-semibold">Total Stock count</span>
-              <span className="text-3xl font-black text-white mt-1">{totalStock} cars</span>
-              <span className="text-[10px] text-slate-500 mt-2">Sum of all quantities in dealership</span>
+              <span className="text-slate-400 text-xs font-semibold">Total Stock Count</span>
+              <span className="text-3xl font-black text-white mt-1">
+                {vehicles.reduce((sum, v) => sum + v.quantity, 0)} cars
+              </span>
+              <span className="text-[10px] text-slate-500 mt-2">Sum of all quantities in database</span>
             </div>
             <div className="p-6 rounded-2xl border border-slate-900 bg-slate-900/20 backdrop-blur-sm flex flex-col text-left">
               <span className="text-slate-400 text-xs font-semibold">Out of Stock Listings</span>
-              <span className={`text-3xl font-black mt-1 ${outOfStockCount > 0 ? 'text-red-400' : 'text-slate-100'}`}>
-                {outOfStockCount} items
+              <span className={`text-3xl font-black mt-1 ${vehicles.filter(v => v.quantity === 0).length > 0 ? 'text-red-400' : 'text-slate-100'}`}>
+                {vehicles.filter(v => v.quantity === 0).length} items
               </span>
               <span className="text-[10px] text-slate-500 mt-2">Requires immediate restocking</span>
             </div>
             <div className="p-6 rounded-2xl border border-slate-900 bg-slate-900/20 backdrop-blur-sm flex flex-col text-left">
               <span className="text-slate-400 text-xs font-semibold">Total Asset Valuation</span>
               <span className="text-3xl font-black text-emerald-400 mt-1">
-                ${inventoryValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                {formatRupee(vehicles.reduce((sum, v) => sum + (v.price * v.quantity), 0))}
               </span>
               <span className="text-[10px] text-slate-500 mt-2">Valuation of current stock</span>
             </div>
@@ -322,12 +326,12 @@ const Dashboard = () => {
                 
                 <form onSubmit={handleSaveVehicle} className="flex flex-col gap-4">
                   <div className="flex flex-col">
-                    <label className="text-xs text-slate-400 font-semibold mb-1">Make / Brand</label>
+                    <label className="text-xs text-slate-400 font-semibold mb-1">Company Name (Make)</label>
                     <input
                       type="text"
                       value={makeInput}
                       onChange={(e) => setMakeInput(e.target.value)}
-                      placeholder="e.g. Porsche"
+                      placeholder="e.g. Tata, Mahindra"
                       className="px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm focus:outline-none focus:border-emerald-500 transition-colors text-white"
                       required
                     />
@@ -339,7 +343,7 @@ const Dashboard = () => {
                       type="text"
                       value={modelInput}
                       onChange={(e) => setModelInput(e.target.value)}
-                      placeholder="e.g. Taycan Turbo"
+                      placeholder="e.g. Harrier, XUV700"
                       className="px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm focus:outline-none focus:border-emerald-500 transition-colors text-white"
                       required
                     />
@@ -351,7 +355,7 @@ const Dashboard = () => {
                       type="text"
                       value={categoryInput}
                       onChange={(e) => setCategoryInput(e.target.value)}
-                      placeholder="e.g. Electric, SUV, Sports"
+                      placeholder="e.g. SUV, Electric, Sedan"
                       className="px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm focus:outline-none focus:border-emerald-500 transition-colors text-white"
                       required
                     />
@@ -359,12 +363,12 @@ const Dashboard = () => {
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="flex flex-col">
-                      <label className="text-xs text-slate-400 font-semibold mb-1">Price ($)</label>
+                      <label className="text-xs text-slate-400 font-semibold mb-1">Price (₹)</label>
                       <input
                         type="number"
                         value={priceInput}
                         onChange={(e) => setPriceInput(e.target.value)}
-                        placeholder="e.g. 150000"
+                        placeholder="e.g. 1850000"
                         min="0"
                         step="0.01"
                         className="px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm focus:outline-none focus:border-emerald-500 transition-colors text-white"
@@ -421,7 +425,7 @@ const Dashboard = () => {
                     type="text"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Search make, model, category..."
+                    placeholder="Search company, model, category..."
                     className="w-full pl-10 pr-4 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm focus:outline-none focus:border-emerald-500 transition-colors text-white"
                   />
                   <svg
@@ -455,14 +459,14 @@ const Dashboard = () => {
                     type="number"
                     value={minPrice}
                     onChange={(e) => setMinPrice(e.target.value)}
-                    placeholder="Min $"
+                    placeholder="Min ₹"
                     className="w-1/2 px-2.5 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs focus:outline-none focus:border-emerald-500 transition-colors text-white"
                   />
                   <input
                     type="number"
                     value={maxPrice}
                     onChange={(e) => setMaxPrice(e.target.value)}
-                    placeholder="Max $"
+                    placeholder="Max ₹"
                     className="w-1/2 px-2.5 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs focus:outline-none focus:border-emerald-500 transition-colors text-white"
                   />
                 </div>
@@ -471,10 +475,10 @@ const Dashboard = () => {
 
             {/* Vehicle Listings Catalog Grid */}
             <div className="grid md:grid-cols-2 gap-6 text-left">
-              {filteredVehicles.length > 0 ? (
-                filteredVehicles.map((v) => (
+              {vehicles.length > 0 ? (
+                vehicles.map((v) => (
                   <div
-                    key={v.id}
+                    key={v._id}
                     className="p-6 rounded-2xl border border-slate-900 bg-slate-900/10 hover:bg-slate-900/20 backdrop-blur-sm transition-all hover:border-slate-800 flex flex-col justify-between group"
                   >
                     <div>
@@ -496,14 +500,14 @@ const Dashboard = () => {
                         {v.make} <span className="font-normal text-slate-300">{v.model}</span>
                       </h4>
                       <p className="text-2xl font-black text-white mt-1">
-                        ${v.price.toLocaleString()}
+                        {formatRupee(v.price)}
                       </p>
                     </div>
 
                     {/* Actions panel */}
                     <div className="mt-6 flex flex-col gap-2">
                       <button
-                        onClick={() => handlePurchase(v.id)}
+                        onClick={() => handlePurchase(v._id)}
                         disabled={v.quantity === 0}
                         className="w-full py-2 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white font-semibold text-xs flex items-center justify-center gap-1.5 transition-all disabled:opacity-40 disabled:pointer-events-none"
                       >
@@ -524,7 +528,7 @@ const Dashboard = () => {
                           </button>
                           
                           <button
-                            onClick={() => handleQuickRestock(v.id, 5)}
+                            onClick={() => handleQuickRestock(v._id, 5)}
                             className="py-1 px-2 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white font-bold text-[10px] border border-slate-800 transition-colors"
                             title="Restock 5 cars"
                           >
@@ -532,7 +536,7 @@ const Dashboard = () => {
                           </button>
 
                           <button
-                            onClick={() => handleDelete(v.id)}
+                            onClick={() => handleDelete(v._id)}
                             className="py-1 px-2.5 rounded bg-red-600/10 border border-red-500/20 text-red-400 hover:bg-red-600 hover:text-white font-bold text-[10px] transition-all"
                           >
                             Delete
@@ -568,7 +572,7 @@ const Dashboard = () => {
       {/* Footer */}
       <footer className="border-t border-slate-900 bg-slate-950/40 py-6 mt-12">
         <div className="max-w-7xl mx-auto px-6 text-center text-slate-600 text-[10px]">
-          ApexMotors Dealership Management Dashboard. Security Protocol Level JWT-30D.
+          ApexMotors Indian Dealership Management Dashboard. Security Protocol Level JWT-30D.
         </div>
       </footer>
     </div>
