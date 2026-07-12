@@ -1,0 +1,18 @@
+:root {
+  --bg-color: #f3f4f6;
+  --text-color: #1f2937;
+  --primary-color: #2563eb;
+  --font-family: system-ui, -apple-system, sans-serif;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-family);
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
